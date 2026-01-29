@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 )
 
 func main() {
@@ -43,7 +44,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 // authMiddleware wraps handlers to check for valid authorization tokens on POST requests
 func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "POST" {
+		if r.Method == "POST" || r.Method == "DELETE" || r.Method == "PUT" {
 			token := r.Header.Get("Authorization")
 
 			if token != "Bearer standard_access_token" {
@@ -95,6 +96,53 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 		users = append(users, newUser)
 		w.WriteHeader(http.StatusCreated)
 		fmt.Printf("created %+v\n", newUser)
+	} else if r.Method == "DELETE" {
+		idStr := r.URL.Query().Get("id")
+		id, err := strconv.Atoi(idStr)
+		if err!=nil {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, "Invalid REQ")
+			return
+		}
+
+		for i, user := range users {
+			if user.ID == id {
+				users = append(users[:i], users[i+1:]...)
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprintf(w, "User %d deleted", id)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+    	fmt.Fprint(w, "User not found")
+	} else if r.Method == "PUT" {
+		var updatedUser User
+		err := json.NewDecoder(r.Body).Decode(&updatedUser)
+    	if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, "Invalid Body")
+			return
+    	}
+		idStr := r.URL.Query().Get("id")
+		id, err := strconv.Atoi(idStr)
+		if err!=nil {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, "Invalid REQ")
+			return
+		}
+
+		for i, user := range users {
+			if user.ID == id {
+				users[i].Name = updatedUser.Name
+				users[i].Email = updatedUser.Email
+				
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(users[i]) // Send back the updated version
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+    	fmt.Fprint(w, "User not found")
 	}
 }
 
