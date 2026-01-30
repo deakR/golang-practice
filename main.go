@@ -5,9 +5,29 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"database/sql"
+	_ "modernc.org/sqlite"	
 )
 
+var db *sql.DB
+
 func main() {
+	var err error
+	db, err = sql.Open("sqlite", "demo.db")
+	if err != nil {
+		panic(err)
+	}
+	if err = db.Ping(); err!=nil {
+		panic(err)
+	}
+
+	_, err = db.Exec("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)")
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println("Database connected!")
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", homeHandler)
 	mux.HandleFunc("/health", healthHandler)
@@ -71,78 +91,93 @@ type WebhookReq struct {
 	} `json:"data"`
 }
 
-var users = []User{
-	{ID: 1, Name: "Leon S. Kennedy", Email: "123@gmail.com"},
-	{ID: 2, Name: "Ada Wong", Email: "321@gmail.com"},
-}
-
 // userHandler handles GET and POST requests for the /users endpoint
 // GET returns all users, POST creates a new user (requires authorization)
 func userHandler(w http.ResponseWriter, r *http.Request) {
+
 	if r.Method == "GET" {
 		w.Header().Set("Content-Type", "application/json")
+		
+		rows, err := db.Query("SELECT id, name, email FROM users")
+		if err != nil {
+			http.Error(w, "Database error", 500)
+			return
+		}
+		defer rows.Close()
+
+		var users []User
+		for rows.Next() {
+			var u User
+			if err := rows.Scan(&u.ID, &u.Name, &u.Email); err != nil {
+				continue
+			}
+			users = append(users, u)
+		}
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(users)
+
+
 	} else if r.Method == "POST" {
 		var newUser User
-		decoder := json.NewDecoder(r.Body)
-		err := decoder.Decode(&newUser)
-		if err != nil {
-			fmt.Fprint(w, "Error decoding json")
+		if err := json.NewDecoder(r.Body).Decode(&newUser); err != nil {
+			http.Error(w, "Error decoding json", 400)
 			return
 		}
 
-		newUser.ID = len(users) + 1
-		users = append(users, newUser)
+		result, err := db.Exec("INSERT INTO users (name, email) VALUES (?, ?)", newUser.Name, newUser.Email)
+		if err != nil {
+			http.Error(w, "Failed to create user", 500)
+			return
+		}
+		
+		id, _ := result.LastInsertId()
+		newUser.ID = int(id)
+		
 		w.WriteHeader(http.StatusCreated)
-		fmt.Printf("created %+v\n", newUser)
+		json.NewEncoder(w).Encode(newUser)
+		fmt.Printf("Created user: %+v\n", newUser)
+
+
 	} else if r.Method == "DELETE" {
 		idStr := r.URL.Query().Get("id")
 		id, err := strconv.Atoi(idStr)
-		if err!=nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprint(w, "Invalid REQ")
+		if err != nil {
+			http.Error(w, "Invalid ID", 400)
 			return
 		}
 
-		for i, user := range users {
-			if user.ID == id {
-				users = append(users[:i], users[i+1:]...)
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprintf(w, "User %d deleted", id)
-				return
-			}
-		}
-		w.WriteHeader(http.StatusNotFound)
-    	fmt.Fprint(w, "User not found")
-	} else if r.Method == "PUT" {
-		var updatedUser User
-		err := json.NewDecoder(r.Body).Decode(&updatedUser)
-    	if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprint(w, "Invalid Body")
+		_, err = db.Exec("DELETE FROM users WHERE id = ?", id)
+		if err != nil {
+			http.Error(w, "Database error", 500)
 			return
-    	}
+		}
+
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "User %d deleted", id)
+
+	} else if r.Method == "PUT" {
 		idStr := r.URL.Query().Get("id")
 		id, err := strconv.Atoi(idStr)
-		if err!=nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprint(w, "Invalid REQ")
+		if err != nil {
+			http.Error(w, "Invalid ID", 400)
 			return
 		}
 
-		for i, user := range users {
-			if user.ID == id {
-				users[i].Name = updatedUser.Name
-				users[i].Email = updatedUser.Email
-				
-				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(users[i]) // Send back the updated version
-				return
-			}
+		var updatedUser User
+		if err := json.NewDecoder(r.Body).Decode(&updatedUser); err != nil {
+			http.Error(w, "Invalid Body", 400)
+			return
 		}
-		w.WriteHeader(http.StatusNotFound)
-    	fmt.Fprint(w, "User not found")
+
+		_, err = db.Exec("UPDATE users SET name = ?, email = ? WHERE id = ?", updatedUser.Name, updatedUser.Email, id)
+		if err != nil {
+			http.Error(w, "Database error", 500)
+			return
+		}
+
+		updatedUser.ID = id
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(updatedUser)
 	}
 }
 
