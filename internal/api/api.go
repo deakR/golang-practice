@@ -7,6 +7,7 @@ import (
 
 type ApiConfig struct {
 	DB *sql.DB
+	AuthSecret string
 }
 
 type User struct {
@@ -23,11 +24,11 @@ type WebhookReq struct {
 	} `json:"data"`
 }
 
-func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
+func (api *ApiConfig) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" || r.Method == "DELETE" || r.Method == "PUT" {
 			token := r.Header.Get("Authorization")
-			if token != "Bearer standard_access_token" {
+			if token != "Bearer " + api.AuthSecret {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
