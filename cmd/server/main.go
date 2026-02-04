@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"basics2/internal/api"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/joho/godotenv"
 	_ "modernc.org/sqlite"
 )
@@ -49,11 +51,21 @@ func main() {
 		AuthSecret: authToken,
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", apiCfg.HealthHandler)
-	mux.HandleFunc("/users", apiCfg.AuthMiddleware(apiCfg.UserHandler))
-	mux.HandleFunc("/webhooks/payment", apiCfg.PaymentHandler)
+	r := chi.NewRouter()
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+
+	r.Get("/health", apiCfg.HealthHandler)
+	r.Post("/webhooks/payment", apiCfg.PaymentHandler)
+
+	r.Route("/users", func(r chi.Router) {
+		r.Use(apiCfg.AuthMiddleware)
+		r.Get("/", apiCfg.GetUsers)
+		r.Post("/", apiCfg.CreateUser)
+		r.Put("/{id}", apiCfg.UpdateUser)
+		r.Delete("/{id}", apiCfg.DeleteUser)
+	})
 
 	fmt.Println("Server started listening at port 7900")
-	http.ListenAndServe(":7900", mux)
+	http.ListenAndServe(":"+port, r)
 }

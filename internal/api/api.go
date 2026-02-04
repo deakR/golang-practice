@@ -24,15 +24,15 @@ type WebhookReq struct {
 	} `json:"data"`
 }
 
-func (api *ApiConfig) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "POST" || r.Method == "DELETE" || r.Method == "PUT" {
-			token := r.Header.Get("Authorization")
-			if token != "Bearer " + api.AuthSecret {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
+func (api *ApiConfig) AuthMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if r.Method == "POST" || r.Method == "DELETE" || r.Method == "PUT" {
+            token := r.Header.Get("Authorization")
+            if token != "Bearer "+api.AuthSecret {
+                w.WriteHeader(http.StatusUnauthorized)
+                return
 			}
-		}
-		next(w, r)
-	}
+        }
+        next.ServeHTTP(w, r)
+    })
 }
